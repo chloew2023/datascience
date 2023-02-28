@@ -1,0 +1,120 @@
+---
+title: "NYPD Shooting Incident Data Analysis"
+author: "CW"
+date: "2023-02-20"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Library
+```{r libraries}
+library("stringr")
+library("tidyverse")
+library("lubridate")
+```
+## Purpose
+By analyzing number of murders during the time of day and number of murders from 2006 through 2021, it could target the time periods when police force should be out more than others to prevent murders, as well as potentially predicting the number of murders from historical data. 
+
+
+## Data Source
+
+The data is downloaded from City of New York website, which includes a list of every shooting incident that occurred in New York from beginning of 2006 to the end of 2021.
+
+```{r csv_import}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD <- read_csv(url_in)
+```
+
+## Data Cleanup
+
+By going through the data table, columns are removed, formats of date and time are converted, boolean flags are replaced with numeric indicators, N/A's are removed, and date & time are combined into another variable.  The table is then summarized.
+
+```{r shooting}
+shooting <- select(NYPD, -c(INCIDENT_KEY, JURISDICTION_CODE, X_COORD_CD,
+Y_COORD_CD, Latitude, Longitude, Lon_Lat)) %>%
+  mutate(OCCUR_DATE=mdy(OCCUR_DATE)) %>%
+  mutate(OCCUR_TIME=hms(OCCUR_TIME)) %>%
+  mutate(STATISTICAL_MURDER_FLAG=ifelse(STATISTICAL_MURDER_FLAG==TRUE, 1, -1)) %>%
+  unite(OCCUR_DATE_TIME, c(OCCUR_DATE, OCCUR_TIME), na.rm=TRUE, remove=FALSE)
+
+summary(shooting)
+```
+
+## Data Visualization
+
+The data is further carved out to analyze the number of murders, both by time of the day and by year.
+
+### Visualization 1
+
+```{r murder_by_time}
+murder_by_time <- shooting %>%
+  filter(STATISTICAL_MURDER_FLAG==1) %>%
+  group_by(OCCUR_TIME, STATISTICAL_MURDER_FLAG) %>%
+  select(OCCUR_TIME, STATISTICAL_MURDER_FLAG, OCCUR_DATE) %>%
+  summarize(num_murder_time=sum(STATISTICAL_MURDER_FLAG))
+
+
+murder_by_time %>%
+  filter(STATISTICAL_MURDER_FLAG==1) %>%
+  ggplot(mapping=aes(x=OCCUR_TIME, y=num_murder_time))+
+  geom_line()+
+  scale_x_time(breaks=c(0, 21600, 43200, 64800, 86400))+
+  labs(title="NYPD Shooting Incident 2006-2021", x="Time of Day", y="Number of Murders")
+```  
+
+As seen in the first plot, murders are usually concentrated at night times and in the early mornings, compared to middle of the day.  
+
+### Visualization 2
+
+```{r murder_by_year}
+murder_by_year <- shooting %>%
+  filter(STATISTICAL_MURDER_FLAG==1) %>%
+  group_by(OCCUR_YEAR=year(OCCUR_DATE), STATISTICAL_MURDER_FLAG) %>%
+  select(OCCUR_YEAR, STATISTICAL_MURDER_FLAG) %>%
+  summarize(num_murder_year=sum(STATISTICAL_MURDER_FLAG))
+  
+
+murder_by_year %>%
+  filter(STATISTICAL_MURDER_FLAG==1) %>%
+  ggplot(mapping=aes(x=OCCUR_YEAR, y=num_murder_year))+
+  geom_line()+
+  scale_x_discrete(limits=c(2006, 2009, 2012, 2015, 2018, 2021))+
+  labs(title="NYPD Shooting Incident 2006-2021", x="Year", y="Number of Murders")
+```
+
+In the second plot, the total number of murders trended down from 2011 but drastically increased between 2019 to 2021.  
+
+### Model & Prediction
+
+```{r murder_year_model}
+murder_year_model <- lm(num_murder_year~lag(num_murder_year), data=murder_by_year)
+summary(murder_year_model)
+
+pred <- predict(murder_year_model)
+new_df <- as.data.frame(pred)
+x_grid <- rep(2007:2021)
+
+ggplot(mapping=aes(x=x_grid, y=new_df$pred))+
+  geom_point(aes(x=x_grid, y=new_df$pred, color="Predictions"))+
+  geom_line(aes(x=murder_by_year$OCCUR_YEAR, y=murder_by_year$num_murder_year, color="Actuals"))+
+  scale_x_discrete(limits=c(2007, 2014, 2021))+
+  theme(legend.position="bottom", axis.text.x=element_text(angle=90))+
+  labs(title="NYPD Shooting Incident 2006-2021 (Actual vs. Predictions)", x="Year", y="Number of Murders")
+```
+
+## Bias, Conclusion & Further Discussion
+From the first visualization, we could see that murders are concentrated at late nights and in the early mornings, which are in line with our intuition about the occurrences of murders, away from daylights and possible attention.  The time-series linear regression would help look into forecast of number of murders based on the prior year.  R-squared is relatively weak in this case at 42%, given that other factors in recent years could have added to the number of murders, such as COVID-19, which could have contributed to the uptick between 2019 to 2021.  Several other factors may also affect the number of murders such as COVID-19 infections impacting the police force, anger or other sentiments due to COVID-related lock-downs.  
+
+Other bias that need to be considered include the total number of shootings and murders as a percentage of the total number of shootings, these time-series data could have changed over the span of sixteen years or they could have been more stagnant even though the number of murders increased during the COVID-19 period.  Additional analysis could be done with the victim age groups and race to determine whether there is a stronger relationship between targeted murders and the COVID-19 time period.  Although the linear regression presented is not the best model to predict number of murders, where we can see some of the scattered plots (ie. prediction) above the actual and some below the actual, it follows that there may be some relationship that exists between the current year and prior year numbers.  
+  
+
+
+
+#### Appendix
+The following packages are needed if they are not installed.  This is a reference and appendix to the original R markdown and code.
+
+
+stringr
+
+tidyverse
